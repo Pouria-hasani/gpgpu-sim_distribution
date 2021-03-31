@@ -1700,8 +1700,15 @@ void dram_t::dram_log(int task) {
 
 // Find next clock domain and increment its time
 int gpgpu_sim::next_clock_domain(void) {
-  double smallest = min3(core_time, icnt_time, dram_time);
+	
+	double smallest;
+	smallest = min3(l2_time, icnt_time, dram_time);
+	
+	for(unsigned i=0;i<m_shader_config->n_simt_clusters;i++)
+		smallest = min2(smallest, cluster_time[i]);
+	
   int mask = 0x00;
+
   if (l2_time <= smallest) {
     smallest = l2_time;
     mask |= L2;
@@ -1719,6 +1726,17 @@ int gpgpu_sim::next_clock_domain(void) {
     mask |= CORE;
     core_time += m_config.core_period;
   }
+  
+    for(unsigned i=0;i<m_shader_config->n_simt_clusters;i++)
+  {
+	  if(cluster_time[i]<=smallest)
+	  {
+		mask |= (CORE+i);
+		cluster_time[i] += m_config.cluster_period[i];
+	  }
+	  
+  }
+  
   return mask;
 }
 
@@ -1739,12 +1757,14 @@ unsigned long long g_single_step =
 
 void gpgpu_sim::cycle() {
   int clock_mask = next_clock_domain();
-
-  if (clock_mask & CORE) {
-    // shader core loading (pop from ICNT into core) follows CORE clock
-    for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++)
-      m_cluster[i]->icnt_cycle();
-  }
+  
+      // shader core loading (pop from ICNT into core) follows CORE clock
+	for(unsigned i = 0; i < m_shader_config->n_simt_clusters; i++)
+	{
+		  if (clock_mask & (CORE+i)) 
+			  m_cluster[i]->icnt_cycle();
+	}
+	
   unsigned partiton_replys_in_parallel_per_cycle = 0;
   if (clock_mask & ICNT) {
     // pop from memory controller to interconnect
@@ -1822,10 +1842,12 @@ void gpgpu_sim::cycle() {
     icnt_transfer();
   }
 
-  if (clock_mask & CORE) {
+
+for(unsigned i = 0; i < m_shader_config->n_simt_clusters; i++)
+{
+  if (clock_mask & (CORE+i)) {
     // L1 cache + shader core pipeline stages
     m_power_stats->pwr_mem_stat->core_cache_stats[CURRENT_STAT_IDX].clear();
-    for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++) {
       if (m_cluster[i]->get_not_completed() || get_more_cta_left()) {
         m_cluster[i]->core_cycle();
         *active_sms += m_cluster[i]->get_n_active_sms();
@@ -1839,7 +1861,7 @@ void gpgpu_sim::cycle() {
       m_cluster[i]->get_current_occupancy(
           gpu_occupancy.aggregate_warp_slot_filled,
           gpu_occupancy.aggregate_theoretical_warp_slots);
-    }
+    
     float temp = 0;
     for (unsigned i = 0; i < m_shader_config->num_shader(); i++) {
       temp += m_shader_stats->m_pipeline_duty_cycle[i];
@@ -1874,22 +1896,18 @@ void gpgpu_sim::cycle() {
     // completed.
     int all_threads_complete = 1;
     if (m_config.gpgpu_flush_l1_cache) {
-      for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++) {
         if (m_cluster[i]->get_not_completed() == 0)
           m_cluster[i]->cache_invalidate();
         else
           all_threads_complete = 0;
-      }
     }
 
     if (m_config.gpgpu_flush_l2_cache) {
       if (!m_config.gpgpu_flush_l1_cache) {
-        for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++) {
           if (m_cluster[i]->get_not_completed() != 0) {
             all_threads_complete = 0;
             break;
           }
-        }
       }
 
       if (all_threads_complete && !m_memory_config->m_L2_config.disabled()) {
@@ -1920,9 +1938,7 @@ void gpgpu_sim::cycle() {
         sec = elapsed_time - 60 * (minutes + 60 * (hrs + 24 * days));
 
         unsigned long long active = 0, total = 0;
-        for (unsigned i = 0; i < m_shader_config->n_simt_clusters; i++) {
           m_cluster[i]->get_current_occupancy(active, total);
-        }
         DPRINTFG(LIVENESS,
                  "uArch: inst.: %lld (ipc=%4.1f, occ=%0.4f\% [%llu / %llu]) "
                  "sim_rate=%u (inst/sec) elapsed = %u:%u:%02u:%02u / %s",
@@ -1968,10 +1984,11 @@ void gpgpu_sim::cycle() {
 #if (CUDART_VERSION >= 5000)
     // launch device kernel
     gpgpu_ctx->device_runtime->launch_one_device_kernel();
-#endif
   }
+#endif
 }
-
+	}
+	}
 void shader_core_ctx::dump_warp_state(FILE *fout) const {
   fprintf(fout, "\n");
   fprintf(fout, "per warp functional simulation status:\n");
