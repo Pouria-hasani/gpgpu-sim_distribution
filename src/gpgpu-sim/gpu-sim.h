@@ -389,7 +389,8 @@ class gpgpu_sim_config : public power_config,
   double icnt_period;
   double dram_period;
   double l2_period;
-
+  double *cluster_period;
+  double *cluster_freq;
   // GPGPU-Sim timing model options
   unsigned long long gpu_max_cycle_opt;
   unsigned long long gpu_max_insn_opt;
