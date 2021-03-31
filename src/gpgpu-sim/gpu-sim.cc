@@ -969,6 +969,8 @@ void gpgpu_sim::reinit_clock_domains(void) {
   dram_time = 0;
   icnt_time = 0;
   l2_time = 0;
+  for(unsigned i=0;i<m_shader_config->n_simt_clusters;i++)		
+  	cluster_time[i] = 0;
 }
 
 bool gpgpu_sim::active() {
